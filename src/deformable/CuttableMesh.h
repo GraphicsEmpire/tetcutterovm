@@ -8,13 +8,10 @@
 #ifndef CUTTABLEMESH_H_
 #define CUTTABLEMESH_H_
 
-//#include "vegafem/include/tetMesh.h"
-
-#include <OpenVolumeMesh/Geometry/VectorT.hh>
-#include <OpenVolumeMesh/Mesh/PolyhedralMesh.hh>
-#include "graphics/SGMesh.h"
-#include "TetSubdivider.h"
 #include "base/Vec.h"
+#include "graphics/SGNode.h"
+#include "VolMesh.h"
+#include "TetSubdivider.h"
 
 
 using namespace PS::MATH;
@@ -24,6 +21,9 @@ namespace PS {
 
 class CuttableMesh : public SGNode /*, public TetMesh */ {
 public:
+	typedef OpenVolumeMesh::Geometry::Vec3d         Vec3d;
+	typedef OpenVolumeMesh::GeometryKernel<Vec3d>   TetMeshVec3d;
+
 	//CutEdge
 	class CutEdge {
 	public:
@@ -81,6 +81,11 @@ public:
 
 	//draw
 	void draw();
+	void drawAllCells();
+	void drawCell(const OpenVolumeMesh::CellHandle& ch) const;
+
+	//
+	bool isCellHandleValid(const OpenVolumeMesh::CellHandle& ch) const;
 
 	//cutting
 	void clearCutContext();
@@ -107,16 +112,19 @@ public:
 	static CuttableMesh* CreateTruthCube(int nx, int ny, int nz, double cellsize);
 
 protected:
+	void setup_volmesh(U32 ctVertices, const double* vertices, U32 ctElements, const U32* elements);
 	void setup(int ctVertices, double* vertices, int ctElements, int* elements);
+
+	bool cell_edges(const OpenVolumeMesh::CellHandle& cellhandle, vector<OpenVolumeMesh::EdgeHandle>& edges);
 
 	//TODO: Sync physics mesh after cut
 
 	//TODO: Sync vbo after synced physics mesh
 private:
-	typedef OpenVolumeMesh::Geometry::Vec3d         Vec3d;
-	typedef OpenVolumeMesh::GeometryKernel<Vec3d>   TetMeshVec3d;
 
-	TetMeshVec3d* m_lpMesh;
+	VolMesh m_mesh;
+	OpenVolumeMesh::CellHandle m_cellToShow;
+
 	TetSubdivider* m_lpSubD;
 	int m_ctCompletedCuts;
 

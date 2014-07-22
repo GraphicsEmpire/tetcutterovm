@@ -34,7 +34,135 @@ CuttableMesh::CuttableMesh(int ctVertices, double* vertices, int ctElements, int
 
 CuttableMesh::~CuttableMesh() {
 	SAFE_DELETE(m_lpSubD);
-	SAFE_DELETE(m_lpMesh);
+	m_mesh.clear(true);
+}
+
+void CuttableMesh::setup_volmesh(U32 ctVertices, const double* vertices, U32 ctElements, const U32* elements) {
+	//face mask
+	const int faceMaskPos[4][3] = { {1, 2, 3}, {2, 0, 3}, {3, 0, 1}, {1, 0, 2} };
+	//	//edge mask
+	//	const int edgeMaskPos[6][2] = { {1, 2}, {2, 3}, {3, 1}, {2, 0}, {0, 3}, {0, 1} };
+
+	//add vertices
+	vector<OpenVolumeMesh::VertexHandle> meshVHandles;
+	meshVHandles.reserve(ctVertices);
+	for(U32 i = 0; i < ctVertices; i++) {
+		meshVHandles.push_back(m_mesh.add_vertex(Vec3d(&vertices[i * 3])));
+	}
+
+	//add elements
+	OpenVolumeMesh::FaceHandle cellFaces[4];
+	OpenVolumeMesh::VertexHandle cellVertices[4];
+
+	for(U32 i=0; i < ctElements; i++) {
+
+		//fetch element vertices
+		for(U32 j=0; j < 4; j++)
+			cellVertices[j] = meshVHandles[ elements[i * 4 + j] ];
+
+		//add element faces
+		vector<OpenVolumeMesh::VertexHandle> vFaceVertices;
+		vFaceVertices.resize(3);
+		for(U32 j=0; j < 4; j++) {
+
+			vFaceVertices[0] = cellVertices[ faceMaskPos[j][0] ];
+			vFaceVertices[1] = cellVertices[ faceMaskPos[j][1] ];
+			vFaceVertices[2] = cellVertices[ faceMaskPos[j][2] ];
+			cellFaces[j] = m_mesh.add_face( vFaceVertices );
+		}
+
+		//get face handles
+		vector< OpenVolumeMesh::HalfFaceHandle > vHalfFaceHandles;
+		vHalfFaceHandles.resize(4);
+		for(U32 j=0; j < 4; j++)
+			vHalfFaceHandles[j] = m_mesh.halfface_handle(cellFaces[j], 0);
+
+		//add element itself
+		m_mesh.add_cell(vHalfFaceHandles, true);
+	}
+}
+
+void CuttableMesh::drawAllCells() {
+	glPushAttrib(GL_ALL_ATTRIB_BITS);
+	glDisable(GL_LIGHTING);
+
+	const U8 ctColors = 7;
+	vec3d colors[ctColors] = {vec3d(0.5, 0.5, 0.5), vec3d(1, 0.3, 0), vec3d(0.3, 1, 0), vec3d(0, 0.3, 1),
+					   	   	   vec3d(1, 1, 0), vec3d(0.5, 0.5, 0.5), vec3d(0, 1, 1)};
+
+
+	//Draw filled faces
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glDisable(GL_CULL_FACE);
+
+	if(isCellHandleValid(m_cellToShow))
+	{
+		glColor3dv(colors[m_cellToShow % ctColors].cptr());
+		drawCell(m_cellToShow);
+	}
+	else {
+		for(U32 i=0; i< m_mesh.n_cells(); i++)
+		{
+			glColor3dv(colors[i % ctColors].cptr());
+			drawCell(i);
+		}
+	}
+	glEnable(GL_CULL_FACE);
+
+
+	//Draw outlined faces
+	glDisable(GL_CULL_FACE);
+	glLineWidth(3.0f);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glColor3f(0.0f, 0.0f, 0.0f);
+
+	for(U32 i=0; i< m_mesh.n_cells(); i++) {
+		drawCell(i);
+	}
+	glEnable(GL_CULL_FACE);
+
+	//Draw vertices
+	glPointSize(5.0f);
+	glColor3f(1.0f, 0.0f, 0.0f);
+	glBegin(GL_POINTS);
+
+	for(OpenVolumeMesh::VertexIter vit = m_mesh.vertices_begin(); vit != m_mesh.vertices_end(); ++vit) {
+		glVertex3dv(m_mesh.vertex(*vit).data());
+	}
+	glEnd();
+
+	glEnable(GL_LIGHTING);
+	glPopAttrib();
+}
+
+void CuttableMesh::drawCell(const OpenVolumeMesh::CellHandle& ch) const {
+	TetMeshVec3d::Cell cell = m_mesh.cell(ch);
+	vector <OpenVolumeMesh::HalfFaceHandle> vHalfFaces = cell.halffaces();
+
+	for(U32 i=0; i < vHalfFaces.size(); i++) {
+
+		glBegin(GL_TRIANGLES);
+		for(OpenVolumeMesh::HalfFaceVertexIter hfv_it = m_mesh.hfv_iter(vHalfFaces[i]); hfv_it.valid(); ++hfv_it) {
+			Vec3d p = m_mesh.vertex(* hfv_it);
+			glVertex3dv(p.data());
+		}
+		glEnd();
+	}
+}
+
+bool CuttableMesh::isCellHandleValid(const OpenVolumeMesh::CellHandle& ch) const {
+	return (ch.is_valid() && (U32)ch.idx() < m_mesh.n_cells());
+}
+
+bool CuttableMesh::cell_edges(const OpenVolumeMesh::CellHandle& cellhandle, vector<OpenVolumeMesh::EdgeHandle>& edges) {
+	//const int edgeMaskPos[6][2] = { {1, 2}, {2, 3}, {3, 1}, {2, 0}, {0, 3}, {0, 1} };
+
+	if(!isCellHandleValid(cellhandle))
+		return false;
+
+	VolMesh::Cell cell = m_mesh.cell(cellhandle);
+	OpenVolumeMesh::CellVertexIter cv_it = m_mesh.cv_iter(cellhandle);
+
 }
 
 void CuttableMesh::setup(int ctVertices, double* vertices, int ctElements, int* elements) {
@@ -45,53 +173,12 @@ void CuttableMesh::setup(int ctVertices, double* vertices, int ctElements, int* 
     }
 
 	//create the mesh
-	m_lpMesh = new TetMeshVec3d();
-
-	//face mask
-	const int faceMaskPos[4][3] = { {1, 2, 3}, {2, 0, 3}, {3, 0, 1}, {1, 0, 2} };
-	//	//edge mask
-	//	const int edgeMaskPos[6][2] = { {1, 2}, {2, 3}, {3, 1}, {2, 0}, {0, 3}, {0, 1} };
-
-	//add vertices
-	vector<OpenVolumeMesh::VertexHandle> meshVHandles;
-	meshVHandles.reserve(ctVertices);
-	for(U32 i = 0; i < ctVertices; i++) {
-		meshVHandles.push_back(m_lpMesh->add_vertex(Vec3d(&vertices[i * 3])));
-	}
-
-	//add elements
-	vector<OpenVolumeMesh::FaceHandle> cellFaces;
-	cellFaces.resize(4);
-
-	vector<OpenVolumeMesh::VertexHandle> cell;
-	cell.resize(4);
-
-	for(U32 i=0; i < ctElements; i++) {
-		elem.load(&elements[i * 4]);
-
-		//V
-		for(U32 j=0; j < 4; j++)
-			faceVertices[j] = meshVHandles[ elem[j] ];
-
-		//F
-		for(U32 j=0; j < 4; j++) {
-
-			cellFaces[j] = m_lpMesh->add_face(  )
-		}
-	}
-
-
-
-
-	//Perform all tests
-	LogInfo("Begin testing the halfedge mesh");
-	TestHalfEdgeTestMesh::tst_all(m_lpHEMesh);
-	LogInfo("Test completed");
+	setup_volmesh(ctVertices, vertices, ctElements, (U32*)elements);
 
 	//
-	m_lpSubD = new TetSubdivider(m_lpHEMesh);
+	//m_lpSubD = new TetSubdivider(m_lpMesh);
 
-	m_aabb = m_lpHEMesh->aabb();
+	//m_aabb = m_lpMesh->aabb();
 	m_aabb.expand(1.0);
 	m_ctCompletedCuts = 0;
 }
@@ -105,9 +192,7 @@ void CuttableMesh::draw() {
 
 	drawBBox();
 
-	//draw tetmesh
-	if(m_lpHEMesh)
-		m_lpHEMesh->draw();
+	drawAllCells();
 
 	//draw cut context
 	int ctCutEdges = m_mapCutEdges.size();
@@ -187,14 +272,12 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 	printf("SWEPT SURF[2]: %.3f, %.3f, %.3f\n", sweptSurface[2].x, sweptSurface[2].y, sweptSurface[2].z);
 
 	//Cut-Edges
-	for (U32 i=0; i < m_lpHEMesh->countEdges(); i++) {
+	for(OpenVolumeMesh::EdgeIter e_it = m_mesh.edges_begin(); e_it != m_mesh.edges_end(); ++e_it) {
 
-		U32 hei = m_lpHEMesh->halfedge_from_edge(i, 0);
-		HEDGE he = m_lpHEMesh->const_halfedgeAt(hei);
+		VolMesh::Edge edge = m_mesh.edge(*e_it);
 
-
-		ss0 = m_lpHEMesh->const_nodeAt(he.from).pos;
-		ss1 = m_lpHEMesh->const_nodeAt(he.to).pos;
+		ss0 = vec3d(m_mesh.vertex(edge.from_vertex()).data());
+		ss1 = vec3d(m_mesh.vertex(edge.to_vertex()).data());
 
 		int res = IntersectSegmentTriangle(ss0, ss1, tri1, t, uvw, xyz);
 		if(res == 0)
@@ -206,15 +289,15 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 			ce.e0 = ss0;
 			ce.e1 = ss1;
 			ce.t = t;
-			ce.from = he.from;
-			ce.to = he.to;
+			ce.from = edge.from_vertex();
+			ce.to = edge.to_vertex();
 
 			//test
 			vec3d temp = ce.e0 + (ce.e1 - ce.e0).normalized() * ce.t;
 			assert( (ce.pos - temp).length() < EPSILON);
 
 			//add to cut edges map
-			mapTempCutEdges.insert( std::make_pair(i, ce));
+			mapTempCutEdges.insert( std::make_pair(*e_it, ce));
 		}
 	}
 
@@ -251,14 +334,14 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 			cn.pos = it->second.e0;
 			m_mapCutNodes.insert( std::pair<U32, CutNode>(cn.idxNode, cn) );
 
-			//iterate over all incoming half-edges
-			vector<U32> incomingHE;
-			m_lpHEMesh->getIncomingHalfEdges(cn.idxNode, incomingHE);
 
-			for(U32 i=0; i < incomingHE.size(); i++) {
-				mapTempCutEdges.erase(m_lpHEMesh->edge_from_halfedge(incomingHE[i]));
+			//iterate over outgoing halfedges
+			OpenVolumeMesh::VertexOHalfEdgeIter voh_it = m_mesh.voh_iter(cn.idxNode);
+			for( ; voh_it.valid(); ++voh_it) {
+				mapTempCutEdges.erase( m_mesh.edge_handle( *voh_it ) );
 				ctRemovedCutEdges++;
 			}
+
 		}
 		//If the end of edge close to the swept surface remove all incident edges from Ec
 		else if(d0 > d1 && t < roi) {
@@ -267,12 +350,10 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 			cn.pos = it->second.e1;
 			m_mapCutNodes.insert( std::pair<U32, CutNode>(cn.idxNode, cn) );
 
-			//iterate over all incoming half-edges
-			vector<U32> incomingHE;
-			m_lpHEMesh->getIncomingHalfEdges(cn.idxNode, incomingHE);
-
-			for(U32 i=0; i < incomingHE.size(); i++) {
-				mapTempCutEdges.erase(m_lpHEMesh->edge_from_halfedge(incomingHE[i]));
+			//iterate over outgoing halfedges
+			OpenVolumeMesh::VertexOHalfEdgeIter voh_it = m_mesh.voh_iter(cn.idxNode);
+			for( ; voh_it.valid(); ++voh_it) {
+				mapTempCutEdges.erase( m_mesh.edge_handle( *voh_it ) );
 				ctRemovedCutEdges++;
 			}
 		}
@@ -302,9 +383,17 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 
 	//count of tets cut
 	int ctCutTet = 0;
+	const int edgeMaskPos[6][2] = { {1, 2}, {2, 3}, {3, 1}, {2, 0}, {0, 3}, {0, 1} };
 
-	for(U32 i=0; i < m_lpHEMesh->countElements(); i++) {
-		const CELL& tet = m_lpHEMesh->const_elemAt(i);
+	for(OpenVolumeMesh::CellIter c_it = m_mesh.cells_begin(); c_it != m_mesh.cells_end(); ++c_it ) {
+
+		VolMesh::Cell cell = m_mesh.cell( *c_it );
+
+		m_mesh.halfedge()
+
+		cell.halffaces()
+
+		const CELL& tet = m_lpMesh->const_elemAt(i);
 		U8 cutEdgeCode = 0;
 		U8 cutNodeCode = 0;
 		double tedges[6];
@@ -312,7 +401,7 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 		//compute cutedge code
 		for(int e=0; e < 6; e++) {
 			tedges[e] = 0.0;
-			U32 edge = m_lpHEMesh->edge_from_halfedge(tet.halfedge[e]);
+			U32 edge = m_lpMesh->edge_from_halfedge(tet.halfedge[e]);
 			if(m_mapCutEdges.find(edge) != m_mapCutEdges.end()) {
 				cutEdgeCode |= (1 << e);
 				tedges[e] = m_mapCutEdges[edge].t;
@@ -364,7 +453,7 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 	for(CUTEDGEITER it = m_mapCutEdges.begin(); it != m_mapCutEdges.end(); it++) {
 		U32 idxNP0, idxNP1;
 
-		if(!m_lpHEMesh->cut_edge(it->first, it->second.t, &idxNP0, &idxNP1)) {
+		if(!m_lpMesh->cut_edge(it->first, it->second.t, &idxNP0, &idxNP1)) {
 			LogErrorArg2("Unable to cut edge %d, edgecutpoint t = %.3f.", it->first, it->second.t);
 			return -1;
 		}
@@ -383,12 +472,12 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 		U8 cutNodeCode = vCutNodeCodes[i];
 		if(cutEdgeCode != 0 || cutNodeCode != 0) {
 
-			const CELL tet = m_lpHEMesh->const_elemAt(vCutElements[i]);
+			const CELL tet = m_lpMesh->const_elemAt(vCutElements[i]);
 
 
 			for(int e=0; e < 6; e++) {
 
-				U32 edge = m_lpHEMesh->edge_from_halfedge(tet.halfedge[e]);
+				U32 edge = m_lpMesh->edge_from_halfedge(tet.halfedge[e]);
 				CUTEDGEITER it = m_mapCutEdges.find(edge);
 
 				//mid points
@@ -420,13 +509,13 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 	clearCutContext();
 
 	//collect all garbage
-	m_lpHEMesh->garbage_collection();
+	m_lpMesh->garbage_collection();
 
 	//Perform all tests
-	TestHalfEdgeTestMesh::tst_all(m_lpHEMesh);
+	TestHalfEdgeTestMesh::tst_all(m_lpMesh);
 
 	//recompute AABB and expand it to detect cuts
-	m_aabb = m_lpHEMesh->computeAABB();
+	m_aabb = m_lpMesh->computeAABB();
 	m_aabb.expand(1.0);
 
 	//Return number of tets cut
@@ -434,17 +523,18 @@ int CuttableMesh::cut(const vector<vec3d>& bladePath0,
 }
 
 void CuttableMesh::displace(double * u) {
-	m_lpHEMesh->displace(u);
-	m_aabb = m_lpHEMesh->aabb();
+	m_lpMesh->displace(u);
+	m_aabb = m_lpMesh->aabb();
 }
 
 
 U32 CuttableMesh::countVertices() const {
-	return m_lpHEMesh->countNodes();
+	return m_lpMesh->n_vertices();
 }
 
 vec3d CuttableMesh::vertexRestPosAt(U32 i) const {
-	return m_lpHEMesh->const_nodeAt(i).restpos;
+	OpenVolumeMesh::VertexHandle vh(i);
+	return vec3d(m_lpMesh->vertex(vh).data());
 }
 
 vec3d CuttableMesh::vertexAt(U32 i) const {
@@ -456,8 +546,8 @@ vec3d CuttableMesh::vertexAt(U32 i) const {
 int CuttableMesh::findClosestVertex(const vec3d& query, double& dist, vec3d& outP) const {
 	double minDist = GetMaxLimit<double>();
 	int idxFound = -1;
-	for(U32 i=0; i < m_lpHEMesh->countNodes(); i++) {
-		vec3d p = m_lpHEMesh->const_nodeAt(i).pos;
+	for(U32 i=0; i < m_lpMesh->countNodes(); i++) {
+		vec3d p = m_lpMesh->const_nodeAt(i).pos;
 		double dist2 = (query - p).length2();
 		if (dist2 < minDist) {
 			minDist = dist2;
